@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let s = defaults.object(forKey: "spriteScale") as? Double, Self.sizes.contains(where: { $0.1 == s }) { PetWindow.scale = s }
         store = SpriteStore(root: dir)
         store.onChange = { [weak self] in self?.loadCast() }
+        store.watch()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🍙"

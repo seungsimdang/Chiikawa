@@ -21,9 +21,41 @@ final class SpriteStore: ObservableObject {
     var onChange: () -> Void = {}
     @Published private(set) var files: [Kind: [String: [URL]]] = [:]
 
+    /// 마지막으로 반영한 폴더 상태와, 바뀐 걸 보고 한 번 더 확인하려고 기다리는 상태.
+    private var applied: [String: String] = [:]
+    private var pending: [String: String]?
+    private var watchTimer: Timer?
+
     init(root: URL) {
         self.root = root
         reload()
+        applied = snapshot()
+    }
+
+    /// 앱 밖(스크립트·Finder)에서 폴더를 바꿔도 캐릭터에 반영한다.
+    func watch() {
+        watchTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
+    }
+
+    /// 바뀐 상태가 다음 확인 때도 같으면(받는 중인 파일이 없으면) 다시 불러온다. 받는 도중 캐릭터를 여러 번 새로 만들지 않기 위해서.
+    func poll() {
+        let now = snapshot()
+        if now == applied { pending = nil; return }
+        if now == pending { pending = nil; changed() } else { pending = now }
+    }
+
+    private func snapshot() -> [String: String] {
+        var out: [String: String] = [:]
+        for kind in Kind.allCases {
+            let dir = root.appendingPathComponent(kind.rawValue)
+            let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+            for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys)) ?? []
+            where ["gif", "png"].contains(url.pathExtension.lowercased()) {
+                let v = try? url.resourceValues(forKeys: Set(keys))
+                out[kind.rawValue + "/" + url.lastPathComponent] = "\(v?.fileSize ?? 0) \(v?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+            }
+        }
+        return out
     }
 
     func reload() {
@@ -89,6 +121,7 @@ final class SpriteStore: ObservableObject {
 
     private func changed() {
         reload()
+        applied = snapshot()
         onChange()
     }
 }
@@ -301,5 +334,17 @@ func storeSelfTest() {
     precondition(store.files[.usagi]?["walk"]?.count == 1 && store.files[.usagi]?["idle"]?.count == 1, "다른 상태로 옮긴다")
     store.trash(store.files[.usagi]!["walk"]![0])
     precondition(store.files[.usagi]?["walk"] == nil && store.count(.usagi) == 1, "지운다")
+    let before = changes
+    store.poll(); store.poll()
+    precondition(changes == before, "앱이 직접 바꾼 건 다시 반영하지 않는다")
+    let kuri = store.root.appendingPathComponent("kurimanju")
+    try! FileManager.default.createDirectory(at: kuri, withIntermediateDirectories: true)
+    try! FileManager.default.copyItem(at: png, to: kuri.appendingPathComponent("idle.png"))
+    store.poll()
+    precondition(changes == before, "밖에서 바뀐 걸 처음 보면 한 번 더 확인할 때까지 기다린다")
+    store.poll()
+    precondition(changes == before + 1 && store.count(.kurimanju) == 1, "밖에서 넣은 그림을 반영한다")
+    store.poll()
+    precondition(changes == before + 1, "한 번만 반영한다")
     print("store selftest ok")
 }
