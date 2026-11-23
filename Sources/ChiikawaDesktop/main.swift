@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var topItem: NSMenuItem!
     private var areaMenu: NSMenu!
     private var picker: AreaPicker?
+    private var castMenu: NSMenu!
+    private var store: SpriteStore!
+    private var dashboard: DashboardWindow?
     private let defaults = UserDefaults.standard
     // 아래 설정들은 바뀔 때마다 저장되고 다음 실행 때 그대로 복원된다.
     private lazy var topmost = defaults.bool(forKey: "topmost")
@@ -53,19 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         print("스프라이트 폴더: \(dir.path)  (README 참고)")
 
         if let s = defaults.object(forKey: "spriteScale") as? Double, Self.sizes.contains(where: { $0.1 == s }) { PetWindow.scale = s }
-        // 그림이 있는 캐릭터만 등장한다.
-        let cast = Kind.allCases.compactMap { k in SpriteSet(root: dir, kind: k).map { (k, $0) } }
-        if cast.isEmpty { print("스프라이트가 없습니다. ./scripts/fetch-sprites.sh 로 받은 뒤 다시 실행하세요.") }
-        let a = area
-        let n = Double(cast.count)
-        for (i, (kind, sprites)) in cast.enumerated() {
-            let pet = Pet(kind: kind, x: a.lowerBound + (a.upperBound - a.lowerBound) * Double(i + 1) / (n + 1), y: floorY)
-            pet.abilities = sprites.states
-            let w = PetWindow(pet: pet, sprites: sprites)
-            w.level = level
-            if !hidden.contains(kind.rawValue) { w.orderFrontRegardless() }
-            windows.append(w)
-        }
+        store = SpriteStore(root: dir)
+        store.onChange = { [weak self] in self?.loadCast() }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🍙"
@@ -74,16 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "풀 뽑기 시간", action: #selector(weed), keyEquivalent: "w")
         menu.addItem(withTitle: "다 같이 춤!", action: #selector(danceAll), keyEquivalent: "d")
         menu.addItem(.separator())
-        let castMenu = NSMenu()
-        castMenu.addItem(withTitle: "모두 보이기", action: #selector(showAll), keyEquivalent: "").target = self
-        castMenu.addItem(withTitle: "모두 숨기기", action: #selector(hideAll), keyEquivalent: "").target = self
-        castMenu.addItem(.separator())
-        for (kind, _) in cast {
-            let item = castMenu.addItem(withTitle: kind.persona.name, action: #selector(toggleCharacter(_:)), keyEquivalent: "")
-            item.representedObject = kind.rawValue
-            item.state = hidden.contains(kind.rawValue) ? .off : .on
-            item.target = self
-        }
+        menu.addItem(withTitle: "그림 관리…", action: #selector(openDashboard), keyEquivalent: ",")
+        castMenu = NSMenu()
         menu.addItem(withTitle: "캐릭터", action: nil, keyEquivalent: "").submenu = castMenu
         areaMenu = NSMenu()
         for (i, (name, _)) in Self.areas.enumerated() {
@@ -107,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
         statusItem.menu = menu
+        loadCast()
+        // 그림이 하나도 없으면(처음 실행) 그림 관리 창을 띄운다.
+        if windows.isEmpty { openDashboard() }
 
         PetView.openNotice = { [weak self] p in
             guard let key = p.notice else { return }
@@ -122,6 +109,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// 그림이 있는 캐릭터만 등장한다. 그림이 바뀌면 캐릭터를 모두 새로 만든다(위치·상태는 처음부터).
+    private func loadCast() {
+        windows.forEach { $0.orderOut(nil) }
+        windows = []
+        let cast = Kind.allCases.compactMap { k in SpriteSet(root: store.root, kind: k).map { (k, $0) } }
+        let a = area
+        let n = Double(cast.count)
+        for (i, (kind, sprites)) in cast.enumerated() {
+            let pet = Pet(kind: kind, x: a.lowerBound + (a.upperBound - a.lowerBound) * Double(i + 1) / (n + 1), y: floorY)
+            pet.abilities = sprites.states
+            let w = PetWindow(pet: pet, sprites: sprites)
+            w.level = level
+            if !hidden.contains(kind.rawValue) { w.orderFrontRegardless() }
+            windows.append(w)
+        }
+        castMenu.removeAllItems()
+        castMenu.addItem(withTitle: "모두 보이기", action: #selector(showAll), keyEquivalent: "").target = self
+        castMenu.addItem(withTitle: "모두 숨기기", action: #selector(hideAll), keyEquivalent: "").target = self
+        castMenu.addItem(.separator())
+        for (kind, _) in cast {
+            let item = castMenu.addItem(withTitle: kind.persona.name, action: #selector(toggleCharacter(_:)), keyEquivalent: "")
+            item.representedObject = kind.rawValue
+            item.state = hidden.contains(kind.rawValue) ? .off : .on
+            item.target = self
+        }
+    }
+
+    /// 이미 켜져 있는데 앱 아이콘을 다시 열면 그림 관리 창을 띄운다.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openDashboard()
+        return false
+    }
+
+    @objc private func openDashboard() {
+        store.reload()
+        if dashboard == nil { dashboard = DashboardWindow(store: store) }
+        NSApp.activate(ignoringOtherApps: true)
+        dashboard?.makeKeyAndOrderFront(nil)
     }
 
     private func tick() {
@@ -362,6 +389,7 @@ private final class PickerView: NSView {
 if CommandLine.arguments.contains("--selftest") {
     selfTest()
     spriteSelfTest()
+    storeSelfTest()
     exit(0)
 }
 

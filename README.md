@@ -1,14 +1,29 @@
-# ChiikawaDesktop
+# Chiikawa Desktop
 
-치이카와와 친구들이 macOS 바탕화면을 돌아다니는 데스크톱 펫. (개인용 팬 프로젝트)
+치이카와와 친구들이 macOS 바탕화면을 돌아다니는 데스크톱 펫.
 
-등장: 스프라이트 폴더에 그림이 있는 캐릭터만 (치이카와, 하치와레, 우사기, 모몽가, 밤만쥬, 시사, 랏코 중)
+> **비공식 팬메이드 (非公式・ファンメイド)** 입니다. 원작자 및 권리자와 관계없는 개인 팬 프로젝트이며, 판매·후원·광고를 하지 않습니다.
+> 원작 그림은 이 저장소와 배포 파일에 들어 있지 않습니다. 그림은 각자 가진 것을 앱에 넣어 씁니다.
+> 권리자의 요청이 있으면 바로 내립니다.
 
-## 실행
+등장: 그림을 넣은 캐릭터만 (치이카와, 하치와레, 우사기, 모몽가, 밤만쥬, 시사, 랏코 중)
+
+## 설치
+
+1. [Releases](https://github.com/seungsimdang/Chiikawa/releases)에서 `ChiikawaDesktop-<버전>.zip`을 받아 풀고, `Chiikawa Desktop.app`을 `응용 프로그램` 폴더로 옮깁니다. (macOS 14 이상)
+2. 처음 열면 macOS가 "확인되지 않은 개발자" 경고로 막습니다. Apple 개발자 인증서로 서명하지 않은 앱이라서입니다.
+   - `시스템 설정 > 개인정보 보호 및 보안`을 열고 아래쪽의 `그래도 열기`를 누른 뒤, 다시 열어서 `열기`를 누릅니다.
+   - 또는 터미널에서 `xattr -dr com.apple.quarantine "/Applications/Chiikawa Desktop.app"`을 실행한 뒤 엽니다.
+3. 처음 실행하면 `그림 관리` 창이 뜹니다. 캐릭터를 고르고 상태별로 PNG·GIF를 끌어다 놓으면 바로 나옵니다.
+
+메뉴바의 🍙 아이콘으로 조작합니다. 켜져 있을 때 앱 아이콘을 다시 열어도 `그림 관리` 창이 뜹니다.
+
+## 직접 빌드
 
 ```sh
-swift run -c release          # 메뉴바 🍙 아이콘으로 조작
+swift run -c release          # 바로 실행
 swift run ChiikawaDesktop --selftest
+./scripts/build-app.sh 0.1.0  # dist/에 .app과 zip을 만든다(ad-hoc 서명)
 ```
 
 ## 인터랙션
@@ -21,6 +36,7 @@ swift run ChiikawaDesktop --selftest
 | 키보드 타자 | 쉬거나 걷던 캐릭터가 멈춰 서서 키를 누를 때마다 콩콩 뛴다(자는 캐릭터는 그대로). 어떤 키인지는 읽지 않고 마지막 입력 시각만 본다 |
 | 메뉴 `간식 주기` | 다 같이 달려가고 먼저 도착한 캐릭터가 먹는다 |
 | 메뉴 `풀 뽑기 시간` / `다 같이 춤!` | 다 같이 풀 뽑기 / 춤추기 |
+| 메뉴 `그림 관리…` | 캐릭터별·상태별로 그림을 넣기(끌어다 놓기 또는 +), 다른 그림으로 바꾸기, 다른 상태로 옮기기, 휴지통으로 보내기. 바꾸면 바로 반영된다 |
 | 메뉴 `캐릭터` | 캐릭터별로, 또는 `모두 보이기`·`모두 숨기기`로 한 번에 보이기·숨기기 |
 | 메뉴 `활동 범위` | 화면 전체 / 왼쪽 / 가운데 / 오른쪽, 또는 `마우스로 지정…`(사각형으로 드래그, 아래 변이 바닥, Esc 취소) 범위 안에서만 돌아다닌다. 점프도 범위 위로 나가지 않는다. 던지면 범위 밖으로 날아가도 걸어서 돌아온다 |
 | 메뉴 `크기` | 작게(0.75배) / 보통 / 크게(1.25배) / 아주 크게(1.5배) |
@@ -34,16 +50,13 @@ swift run ChiikawaDesktop --selftest
 
 Orca 알림은 `orca` CLI(`/Applications/Orca.app` 안 또는 PATH)로 3초마다 `orca agent list`를 읽는다. CLI가 없으면 꺼진다. 지금 보고 있는 세션이 끝나도 알린다(CLI로는 보고 있는 세션을 알 수 없다).
 
-## 스프라이트
+## 그림
 
-캐릭터 그림은 [chiikawa-wallpaper.com](https://chiikawa-wallpaper.com/)의 투명 배경 스티커·GIF를 아래 스크립트로 받아 쓴다. 그림이 하나도 없는 캐릭터는 나오지 않는다.
-원작 그림이라 저장소에는 넣지 않고 개인 PC의 스프라이트 폴더에만 받는다.
+그림은 메뉴 `그림 관리…`에서 넣는 게 가장 쉽습니다. 넣은 그림은 아래 폴더에 저장되고, 폴더에 직접 넣어도 됩니다.
 
-```sh
-./scripts/fetch-sprites.sh    # ~/Library/Application Support/ChiikawaDesktop 에 저장. 받은 뒤 앱 재시작
-```
+`scripts/fetch-sprites.sh`는 개인 PC에 그림을 받으려고 만든 스크립트입니다. 그림을 받아 오는 chiikawa-wallpaper.com(비공식 팬 사이트)의 [이용약관](https://chiikawa-wallpaper.com/terms)은 개인 용도 사용만 허락하고, 자동화 도구로 대량 다운로드하는 것을 금지합니다. 쓰기 전에 약관을 확인하세요.
 
-직접 넣을 때 규칙:
+파일 규칙:
 
 ```
 ~/Library/Application Support/ChiikawaDesktop/<캐릭터>/<상태>.gif|png
