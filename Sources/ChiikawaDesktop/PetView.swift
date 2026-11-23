@@ -7,7 +7,8 @@ private let S: CGFloat = 72
 final class PetWindow: NSWindow {
     /// 메뉴 `크기`로 바꾸는 배율(길이 기준). 창·그림·효과가 모두 같이 커진다.
     static var scale: CGFloat = 1
-    static var size: NSSize { NSSize(width: 150 * scale, height: 150 * scale) }
+    /// 알림 말풍선이 한 줄에 들어가게 그림보다 넓다.
+    static var size: NSSize { NSSize(width: 230 * scale, height: 150 * scale) }
     let pet: Pet
     private let petView: PetView
 
@@ -35,6 +36,8 @@ final class PetView: NSView {
     static let baseY: CGFloat = 6
     /// 크기 `보통`일 때 캐릭터 하나가 화면에서 차지하는 면적(pt²). 지름 약 85pt 원 정도.
     static let spriteArea: CGFloat = 5600
+    /// 알림이 걸린 캐릭터를 두 번 눌렀을 때.
+    static var openNotice: (Pet) -> Void = { _ in }
     private let pet: Pet
     private let sprites: SpriteSet
     private var downAt: NSPoint?
@@ -88,6 +91,8 @@ final class PetView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if dragging { pet.release(vx: velocity.x, vy: velocity.y) }
+        // 알림이 걸려 있으면 한 번 누르기는 무시하고 두 번 눌러야 세션으로 간다.
+        else if pet.notice != nil { if event.clickCount >= 2 { Self.openNotice(pet) } }
         else { pet.click(now: event.timestamp) }
         downAt = nil
         dragging = false
@@ -116,6 +121,7 @@ final class PetView: NSView {
         case .dance: cx += CGFloat(sin(t * 8)) * 5; base += CGFloat(abs(sin(t * 8))) * 4
         default: break
         }
+        if pet.tap > 0 { base += CGFloat(sin(pet.tap / Pet.tapDuration * .pi)) * 7 }
 
         let state = pet.state
         if state != shownState { shownState = state; pick = .random(in: 0..<1000); stateStart = t }
@@ -128,8 +134,10 @@ final class PetView: NSView {
         if pet.facing < 0 && state == "walk" { ctx.scaleBy(x: -1, y: 1) }
         // 그림마다 여백·귀·소품·자세가 달라서 높이 대신 보이는 면적(불투명 픽셀)을 맞춘다. 창을 넘지 않게 자른다.
         let scale = PetWindow.scale
-        let k = min(sqrt(Self.spriteArea / anim.mass) * scale, 140 * scale / anim.size.height, (bounds.width - 10) / anim.size.width)
+        let k = min(sqrt(Self.spriteArea / anim.mass) * scale, 140 * scale / anim.size.height, 140 * scale / anim.size.width)
         let w = anim.size.width * k, h = anim.size.height * k
+        // 자는 동안은 숨 쉬듯 천천히 부풀었다 줄어든다(발은 바닥에 붙인 채).
+        if state == "sleep" { let b = CGFloat(sin(t * 2.2)) * 0.025; ctx.scaleBy(x: 1 - b / 2, y: 1 + b) }
         ctx.interpolationQuality = .high
         ctx.draw(anim.frame(at: t - stateStart), in: CGRect(x: -w / 2, y: 0, width: w, height: h))
         ctx.restoreGState()
@@ -138,18 +146,26 @@ final class PetView: NSView {
         if !(pet.effect == .tears && sprites.has("cry")) { drawEffect(pet.effect, t) }
         ctx.restoreGState()
 
-        if let text = pet.bubble { drawBubble(text) }
+        if let text = pet.bubble { drawBubble(text, alert: pet.showingNotice) }
     }
 
-    private func drawBubble(_ text: String) {
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: outline]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let w = min(size.width + 14, bounds.width - 4), h: CGFloat = 22
-        let r = NSRect(x: bounds.midX - w / 2, y: bounds.height - h - 2, width: w, height: h)
+    /// 창 폭에 맞춰 줄을 바꾸고, 두 줄을 넘으면 끝을 말줄임(…)한다.
+    /// 알림 말풍선은 노란 바탕으로 구분한다.
+    private func drawBubble(_ text: String, alert: Bool) {
+        let font = NSFont.boldSystemFont(ofSize: 12)
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        style.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: outline, .paragraphStyle: style]
+        let opts: NSString.DrawingOptions = [.usesLineFragmentOrigin, .truncatesLastVisibleLine]
+        let maxW = bounds.width - 18, twoLines = ceil(font.ascender - font.descender + font.leading) * 2
+        let fit = (text as NSString).boundingRect(with: NSSize(width: maxW, height: twoLines), options: opts, attributes: attrs)
+        let textW = min(ceil(fit.width), maxW), textH = min(ceil(fit.height), twoLines)
+        let r = NSRect(x: bounds.midX - (textW + 14) / 2, y: bounds.height - textH - 10, width: textW + 14, height: textH + 8)
         let p = NSBezierPath(roundedRect: r, xRadius: 10, yRadius: 10)
-        NSColor.white.setFill(); p.fill()
-        outline.setStroke(); p.lineWidth = 1.5; p.stroke()
-        (text as NSString).draw(at: NSPoint(x: r.midX - size.width / 2, y: r.midY - size.height / 2), withAttributes: attrs)
+        (alert ? NSColor(calibratedRed: 1, green: 0.95, blue: 0.7, alpha: 1) : NSColor.white).setFill(); p.fill()
+        outline.setStroke(); p.lineWidth = alert ? 2 : 1.5; p.stroke()
+        (text as NSString).draw(with: NSRect(x: r.midX - maxW / 2, y: r.minY + 4, width: maxW, height: textH), options: opts, attributes: attrs)
     }
 }
 

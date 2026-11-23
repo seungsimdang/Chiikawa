@@ -21,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return r[0]...r[1]
     }
     private var last = CACurrentMediaTime()
+    private var sinceKey = 0.0
+    private var surfaces: [Surface] = [], frames: [Int: CGRect] = [:], surfaceAge = 0.0
+    private let orca = OrcaWatcher()
+    private var agents: [String: OrcaWatcher.Agent] = [:]
 
     // 기본은 바탕화면 아이콘 바로 위(앱 창보다 아래). "항상 위"를 켜면 모든 창 위.
     private var level: NSWindow.Level {
@@ -104,6 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
         statusItem.menu = menu
 
+        PetView.openNotice = { [weak self] p in
+            guard let key = p.notice else { return }
+            p.clearNotice()
+            if let a = self?.agents[key] { OrcaWatcher.open(a) }
+        }
+        orca.onNotice = { [weak self] a in self?.notify(a) }
+        orca.onUpdate = { [weak self] states in
+            // 사용자가 그 세션에 답해서 다시 일하거나 세션이 없어지면 알림을 내린다.
+            for p in self?.windows.map(\.pet) ?? [] { if let k = p.notice, (states[k] ?? "working") == "working" { p.clearNotice() } }
+        }
+        orca.start()
+
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -115,8 +131,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let f = screen
         let a = area
         let floor = floorY, ceiling = ceilingY
+        surfaceAge -= dt
+        if surfaceAge <= 0 { surfaceAge = 0.3; refreshSurfaces() }
         for p in pets {
-            p.step(dt, floor: floor, minX: a.lowerBound, maxX: a.upperBound, walls: (f.minX + 50)...(f.maxX - 50), ceiling: ceiling)
+            p.step(dt, floor: floor, minX: a.lowerBound, maxX: a.upperBound, walls: (f.minX + 50)...(f.maxX - 50), ceiling: ceiling,
+                   surfaces: surfaces)
         }
 
         if let fd = food {
@@ -130,9 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if p.kind == .chiikawa { p.say("아…") }
                 }
             } else {
-                for p in pets where (p.mode == .idle || p.mode == .walk) && p.can("walk") && p.can("eat") { p.mode = .goTo(fd.x) }
+                for p in pets where p.perch == nil && (p.mode == .idle || p.mode == .walk) && p.can("walk") && p.can("eat") { p.mode = .goTo(fd.x) }
             }
         }
+
+        // 마지막 키 입력 후 지난 시간만 본다(어떤 키인지는 모른다). 줄어들었으면 새 키를 누른 것.
+        let k = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        if k < sinceKey { pets.forEach { $0.keyTap() } }
+        sinceKey = k
 
         meet(dt)
 
@@ -153,12 +177,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func meet(_ dt: Double) {
         guard Double.random(in: 0..<1) < dt * 0.3, let (a, b, lineA, lineB, love) = Self.pairs.randomElement(),
               let pa = pets.first(where: { $0.kind == a }), let pb = pets.first(where: { $0.kind == b }),
-              pa.mode == .idle, pb.mode == .idle, pa.bubble == nil, pb.bubble == nil, abs(pa.x - pb.x) < 160
+              pa.mode == .idle, pb.mode == .idle, pa.bubble == nil, pb.bubble == nil, abs(pa.x - pb.x) < 160, abs(pa.y - pb.y) < 20
         else { return }
         pa.facing = pb.x > pa.x ? 1 : -1
         pb.facing = -pa.facing
         pa.say(lineA); pb.say(lineB)
         if love { pa.show(.hearts, 2); pb.show(.hearts, 2) }
+    }
+
+    /// 창 윗변 중 활동 범위 안에서 보이는 구간. 창이 움직이면 그 위의 캐릭터도 같이 옮긴다.
+    private func refreshSurfaces() {
+        let rects = screenWindows(excludingPID: getpid())
+        let a = area, lo = floorY + 30, hi = ceilingY - 40
+        surfaces = visibleTops(rects, band: 60 * PetWindow.scale, frontOnly: topmost).compactMap { s in
+            let l = max(s.x.lowerBound + 15, a.lowerBound), r = min(s.x.upperBound - 15, a.upperBound)
+            return r - l >= 40 && s.y >= lo && s.y <= hi ? Surface(id: s.id, y: s.y, x: l...r) : nil
+        }
+        let now = Dictionary(rects.map { ($0.id, $0.rect) }, uniquingKeysWith: { a, _ in a })
+        for p in pets where p.mode != .held {
+            guard let id = p.perch, let o = frames[id], let n = now[id] else { continue }
+            p.x += n.minX - o.minX; p.y += n.maxY - o.maxY
+        }
+        frames = now
+    }
+
+    /// 알림이 없는 캐릭터 하나가 튀어 오르며 알린다.
+    private func notify(_ a: OrcaWatcher.Agent) {
+        agents[a.key] = a
+        guard !pets.contains(where: { $0.notice == a.key }) else { return }
+        (pets.filter { $0.notice == nil }.randomElement() ?? pets.randomElement())?.alert(a.key, state: a.state)
     }
 
     @objc private func toggleCharacter(_ item: NSMenuItem) {
