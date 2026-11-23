@@ -38,6 +38,8 @@ final class PetView: NSView {
     static let spriteArea: CGFloat = 5600
     /// 알림이 걸린 캐릭터를 두 번 눌렀을 때.
     static var openNotice: (Pet) -> Void = { _ in }
+    /// 캐릭터를 우클릭하면 뜨는 메뉴. 메뉴 막대의 🍙 메뉴와 같은 것.
+    static var contextMenu: NSMenu?
     private let pet: Pet
     private let sprites: SpriteSet
     private var downAt: NSPoint?
@@ -108,6 +110,8 @@ final class PetView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) { lastHover = nil }
+
+    override func menu(for event: NSEvent) -> NSMenu? { Self.contextMenu }
 
     // MARK: - 그리기
 

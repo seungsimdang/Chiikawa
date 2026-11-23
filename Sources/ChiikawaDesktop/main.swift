@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var windows: [PetWindow] = []
     private var pets: [Pet] { windows.filter(\.isVisible).map(\.pet) }
     private var food: (x: Double, window: NSWindow)?
@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var castMenu: NSMenu!
     private var store: SpriteStore!
     private var dashboard: DashboardWindow?
+    /// 메뉴(🍙·우클릭)가 떠 있는 동안 캐릭터를 멈춘다.
+    private var menuOpen = false
     private let defaults = UserDefaults.standard
     // 아래 설정들은 바뀔 때마다 저장되고 다음 실행 때 그대로 복원된다.
     private lazy var topmost = defaults.bool(forKey: "topmost")
@@ -90,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
+        menu.delegate = self
         statusItem.menu = menu
+        PetView.contextMenu = menu
         loadCast()
         // 그림이 하나도 없으면(처음 실행) 그림 관리 창을 띄운다.
         if windows.isEmpty { openDashboard() }
@@ -151,10 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dashboard?.makeKeyAndOrderFront(nil)
     }
 
+    func menuWillOpen(_ menu: NSMenu) { menuOpen = true }
+    func menuDidClose(_ menu: NSMenu) { menuOpen = false }
+
     private func tick() {
         let now = CACurrentMediaTime()
         let dt = min(now - last, 0.05)
         last = now
+        if menuOpen { return }
         let f = screen
         let a = area
         let floor = floorY, ceiling = ceilingY
