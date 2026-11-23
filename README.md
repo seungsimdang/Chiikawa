@@ -10,11 +10,23 @@
 
 ## 설치
 
-1. [Releases](https://github.com/seungsimdang/Chiikawa/releases)에서 `ChiikawaDesktop-<버전>.zip`을 받아 풀고, `Chiikawa Desktop.app`을 `응용 프로그램` 폴더로 옮깁니다. (macOS 14 이상)
-2. 처음 열면 macOS가 "확인되지 않은 개발자" 경고로 막습니다. Apple 개발자 인증서로 서명하지 않은 앱이라서입니다.
-   - `시스템 설정 > 개인정보 보호 및 보안`을 열고 아래쪽의 `그래도 열기`를 누른 뒤, 다시 열어서 `열기`를 누릅니다.
-   - 또는 터미널에서 `xattr -dr com.apple.quarantine "/Applications/Chiikawa Desktop.app"`을 실행한 뒤 엽니다.
-3. 처음 실행하면 `그림 관리` 창이 뜹니다. 캐릭터를 고르고 상태별로 PNG·GIF를 끌어다 놓으면 바로 나옵니다.
+1. [Releases](https://github.com/seungsimdang/Chiikawa/releases)의 `Assets`에서 `ChiikawaDesktop-<버전>.zip`을 받아 풀고, `Chiikawa Desktop.app`을 `응용 프로그램` 폴더로 옮깁니다. (macOS 14 이상)
+
+   <img src="docs/install/1-download.png" width="640" alt="Releases의 Assets에서 zip 받기">
+
+2. 앱을 처음 열면 아래처럼 막힙니다. Apple 개발자 인증서로 서명하지 않은 앱이라서입니다. `완료`를 누르세요(`휴지통으로 이동`은 누르지 마세요).
+
+   <img src="docs/install/2-blocked.png" width="260" alt="열지 않음 경고창">
+
+3. `시스템 설정 > 개인정보 보호 및 보안`을 열고 아래로 내려 `보안`의 `그래도 열기`를 누른 뒤, 암호나 Touch ID로 확인하고 앱을 다시 엽니다. 다시 묻는 창이 뜨면 `열기`를 누릅니다.
+
+   <img src="docs/install/3-open-anyway.png" width="560" alt="개인정보 보호 및 보안의 그래도 열기 버튼">
+
+   터미널을 쓸 줄 알면 `xattr -dr com.apple.quarantine "/Applications/Chiikawa Desktop.app"`을 실행한 뒤 열어도 됩니다.
+
+4. 처음 실행하면 `그림 관리` 창이 뜹니다. 캐릭터를 고르고 상태별 칸에 PNG·GIF를 끌어다 놓거나 `+`를 누르면 바로 바탕화면에 나옵니다.
+
+   <img src="docs/install/4-dashboard.png" width="640" alt="그림 관리 창">
 
 메뉴바의 🍙 아이콘으로 조작합니다. 켜져 있을 때 앱 아이콘을 다시 열어도 `그림 관리` 창이 뜹니다.
 
