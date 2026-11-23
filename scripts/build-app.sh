@@ -6,12 +6,17 @@ cd "$(dirname "$0")/.."
 version="${1:-0.1.0}"
 app="dist/Chiikawa Desktop.app"
 
-swift build -c release --arch arm64 --arch x86_64
-bin="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/ChiikawaDesktop"
+# 아키텍처별로 빌드해 lipo로 합친다(--arch를 여러 개 주는 방식은 Xcode가 있어야 한다).
+bins=""
+for arch in arm64 x86_64; do
+  opts="-c release --triple $arch-apple-macosx14.0 --scratch-path .build/$arch"
+  swift build $opts
+  bins="$bins $(swift build $opts --show-bin-path)/ChiikawaDesktop"
+done
 
 rm -rf dist
 mkdir -p "$app/Contents/MacOS"
-cp "$bin" "$app/Contents/MacOS/ChiikawaDesktop"
+lipo -create -output "$app/Contents/MacOS/ChiikawaDesktop" $bins
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
