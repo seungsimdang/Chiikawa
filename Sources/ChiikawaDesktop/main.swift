@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "풀 뽑기 시간", action: #selector(weed), keyEquivalent: "w")
         menu.addItem(withTitle: "다 같이 춤!", action: #selector(danceAll), keyEquivalent: "d")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "그림 관리…", action: #selector(openDashboard), keyEquivalent: ",")
+        menu.addItem(withTitle: "캐릭터 편집…", action: #selector(openDashboard), keyEquivalent: ",")
         castMenu = NSMenu()
         menu.addItem(withTitle: "캐릭터", action: nil, keyEquivalent: "").submenu = castMenu
         areaMenu = NSMenu()
@@ -97,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         PetView.contextMenu = menu
         loadCast()
-        // 그림이 하나도 없으면(처음 실행) 그림 관리 창을 띄운다.
+        // 처음 실행해 그림이 없으면 캐릭터 편집 창을 띄운다.
         if windows.isEmpty { openDashboard() }
 
         PetView.openNotice = { [weak self] p in
@@ -124,7 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let a = area
         let n = Double(cast.count)
         for (i, (kind, sprites)) in cast.enumerated() {
-            let pet = Pet(kind: kind, x: a.lowerBound + (a.upperBound - a.lowerBound) * Double(i + 1) / (n + 1), y: floorY)
+            let pet = Pet(kind: kind, x: a.lowerBound + (a.upperBound - a.lowerBound) * Double(i + 1) / (n + 1),
+                          y: floorY, dialogue: store.dialogue)
             pet.abilities = sprites.states
             let w = PetWindow(pet: pet, sprites: sprites)
             w.level = level
@@ -143,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// 이미 켜져 있는데 앱 아이콘을 다시 열면 그림 관리 창을 띄운다.
+    /// 이미 켜져 있는데 앱 아이콘을 다시 열면 캐릭터 편집 창을 띄운다.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         openDashboard()
         return false
@@ -167,6 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let f = screen
         let a = area
         let floor = floorY, ceiling = ceilingY
+        let visible = windows.filter(\.isVisible)
+        let pets = visible.map(\.pet)
         surfaceAge -= dt
         if surfaceAge <= 0 { surfaceAge = 0.3; refreshSurfaces() }
         for p in pets {
@@ -175,17 +178,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if let fd = food {
-            if let eater = pets.first(where: { $0.can("eat") && abs($0.x - fd.x) < 14 && $0.y <= floor + 1 && $0.mode != .held && $0.mode != .eat }) {
+            if let eater = pets.first(where: { $0.notice == nil && $0.can("eat") && abs($0.x - fd.x) < 14 && $0.y <= floor + 1 && $0.mode != .held && $0.mode != .eat }) {
                 eater.eat()
                 fd.window.orderOut(nil)
                 food = nil
                 for p in pets where p !== eater {
                     guard case .goTo = p.mode else { continue }
                     p.mode = .idle; p.modeTime = 1.5
-                    if p.kind == .chiikawa { p.say("아…") }
+                    if p.kind == .chiikawa { p.say(.missedSnack) }
                 }
             } else {
-                for p in pets where p.perch == nil && (p.mode == .idle || p.mode == .walk) && p.can("walk") && p.can("eat") { p.mode = .goTo(fd.x) }
+                for p in pets where p.perch == nil && (p.mode == .idle || p.mode == .walk) &&
+                    p.canRetryWalk && p.can("walk") && p.can("eat") {
+                    p.mode = .goTo(fd.x)
+                    p.say(for: "walk")
+                }
             }
         }
 
@@ -194,30 +201,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if k < sinceKey { pets.forEach { $0.keyTap() } }
         sinceKey = k
 
+        // 드래그와 포물선 이동은 착지한 뒤부터 간격을 적용한다.
+        separatePets(visible.compactMap { w in
+            let pet = w.pet
+            guard pet.mode != .held && pet.mode != .fall else { return nil }
+            if pet.mode == .notice && pet.vy != 0 { return nil }
+            let perch = surfaces.first { $0.id == pet.perch && $0.x.contains(pet.x) }
+            // 던져서 활동 범위 밖에 착지했다면 걸어서 돌아올 때까지 현재 위치도 허용한다.
+            let range = perch?.x ?? min(a.lowerBound, pet.x)...max(a.upperBound, pet.x)
+            return (pet, w.bodySize, range)
+        }, dt: dt)
+        pets.forEach { $0.finishMovement(dt) }
         meet(dt)
 
         windows.forEach { $0.sync() }
     }
 
-    /// 가까이 있는 둘이 가끔 말을 주고받는다. (먼저 말하는 쪽, 대답하는 쪽, 대사, 대답, 대답하는 쪽에 하트)
-    private static let pairs: [(Kind, Kind, String, String, Bool)] = [
-        (.hachiware, .chiikawa, "치이카와!", "와아…!", true),
-        (.chiikawa, .rakko, "멋지다…!", "…훗", false),
-        (.hachiware, .rakko, "랏코 멋있어!", "…단련해", false),
-        (.usagi, .chiikawa, "야하!", "와…!", false),
-        (.momonga, .chiikawa, "나 귀엽지?", "히익…", false),
-        (.kurimanju, .hachiware, "하아—!", "맛있어 보여~", false),
-        (.shisa, .hachiware, "어서 오세요!", "라멘 주세요~!", true),
-    ]
-
+    /// 가까이 있는 둘이 가끔 말을 주고받는다.
     private func meet(_ dt: Double) {
-        guard Double.random(in: 0..<1) < dt * 0.3, let (a, b, lineA, lineB, love) = Self.pairs.randomElement(),
+        guard Double.random(in: 0..<1) < dt * 0.3, let (a, b, lineA, lineB, love) = Dialogue.conversations.randomElement(),
               let pa = pets.first(where: { $0.kind == a }), let pb = pets.first(where: { $0.kind == b }),
               pa.mode == .idle, pb.mode == .idle, pa.bubble == nil, pb.bubble == nil, abs(pa.x - pb.x) < 160, abs(pa.y - pb.y) < 20
         else { return }
         pa.facing = pb.x > pa.x ? 1 : -1
         pb.facing = -pa.facing
-        pa.say(lineA); pb.say(lineB)
+        pa.say(lineA, for: "idle"); pb.say(lineB, for: "idle")
         if love { pa.show(.hearts, 2); pb.show(.hearts, 2) }
     }
 
@@ -264,7 +272,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func feed() {
         food?.window.orderOut(nil)
-        let x = Double.random(in: area)
+        let a = area, floor = floorY
+        let target = Double.random(in: a)
+        let grounded = windows.filter { $0.isVisible && abs($0.pet.y - floor) <= 1 && $0.pet.mode != .held }
+        // 간식은 적어도 한 마리가 다른 캐릭터를 통과하지 않고 닿을 수 있는 곳에 놓는다.
+        let reachable = grounded.compactMap { eater -> Double? in
+            let pet = eater.pet
+            guard pet.notice == nil && pet.can("eat") && pet.can("walk") && a.contains(pet.x) else { return nil }
+            var lo = a.lowerBound, hi = a.upperBound
+            for neighbor in grounded where neighbor !== eater {
+                let gap = (eater.bodySize.width + neighbor.bodySize.width) / 2
+                if neighbor.pet.x < pet.x { lo = max(lo, min(pet.x, neighbor.pet.x + gap)) }
+                else { hi = min(hi, max(pet.x, neighbor.pet.x - gap)) }
+            }
+            return min(max(target, lo), hi)
+        }
+        let x = reachable.min { abs($0 - target) < abs($1 - target) } ?? target
         let w = NSWindow(contentRect: NSRect(x: x - 22, y: floorY, width: 44, height: 44), styleMask: .borderless,
                          backing: .buffered, defer: false)
         w.isOpaque = false
@@ -279,19 +302,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         w.level = level
         w.orderFrontRegardless()
         food = (x, w)
-        pets.first { $0.kind == .usagi }?.say("야하!")
+        if let usagi = pets.first(where: { $0.kind == .usagi }) { usagi.say("야하!", for: usagi.state) }
     }
 
     @objc private func weed() {
-        for p in pets where p.mode != .held && p.can("weed") {
+        for p in pets where p.notice == nil && p.mode != .held && p.can("weed") {
             p.mode = .weed; p.modeTime = 8
             p.show(.grass, 8)
-            p.say(p.persona.weedLine)
+            p.say(.weed)
         }
     }
 
     @objc private func danceAll() {
-        for p in pets where p.mode != .held && p.can("dance") { p.dance(6); p.say("♪") }
+        for p in pets where p.mode != .held && p.can("dance") { p.dance(6); p.say(.dance) }
     }
 
     @objc private func setSize(_ item: NSMenuItem) {
@@ -399,6 +422,7 @@ if CommandLine.arguments.contains("--selftest") {
     selfTest()
     spriteSelfTest()
     storeSelfTest()
+    dialogueSelfTest()
     exit(0)
 }
 

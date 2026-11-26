@@ -18,6 +18,7 @@ final class SpriteStore: ObservableObject {
     static var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
 
     let root: URL
+    let dialogue = Dialogue(defaults: .standard)
     var onChange: () -> Void = {}
     @Published private(set) var files: [Kind: [String: [URL]]] = [:]
 
@@ -126,12 +127,12 @@ final class SpriteStore: ObservableObject {
     }
 }
 
-/// 메뉴 `그림 관리…`로 여는 창.
+/// 메뉴 `캐릭터 편집…`으로 여는 창.
 final class DashboardWindow: NSWindow {
     init(store: SpriteStore) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 860, height: 620), styleMask: [.titled, .closable, .resizable, .miniaturizable],
                    backing: .buffered, defer: false)
-        title = "그림 관리"
+        title = "캐릭터 편집"
         isReleasedWhenClosed = false
         contentViewController = NSHostingController(rootView: DashboardView(store: store))
         setContentSize(NSSize(width: 860, height: 620))
@@ -157,6 +158,7 @@ struct DashboardView: View {
         } detail: {
             if let kind = selected { KindView(store: store, kind: kind) } else { Text("캐릭터를 고르세요").foregroundStyle(.secondary) }
         }
+        .navigationTitle("캐릭터 편집")
         .toolbar {
             ToolbarItem {
                 Button { NSWorkspace.shared.open(store.root) } label: { Label("폴더 열기", systemImage: "folder") }
@@ -182,7 +184,6 @@ private struct KindView: View {
             }
             .padding(20)
         }
-        .navigationTitle(kind.persona.name)
     }
 }
 
@@ -191,8 +192,15 @@ private struct StateRow: View {
     let kind: Kind
     let state: String
     @State private var targeted = false
+    @State private var editingDialogue = false
+    @State private var draft = ""
+    @State private var restoreDefaults = false
 
     private var urls: [URL] { store.files[kind]?[state] ?? [] }
+    private var defaultDialogue: String { Dialogue.defaultLines(for: kind, state: state).joined(separator: "\n") }
+    private var savedDialogue: String {
+        store.dialogue.lines(for: kind, state: state)?.joined(separator: "\n") ?? defaultDialogue
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -200,6 +208,12 @@ private struct StateRow: View {
                 Text(SpriteStore.labels[state] ?? state).font(.headline)
                 Text(state).font(.caption.monospaced()).foregroundStyle(.secondary)
                 if let hint = SpriteStore.hints[state] { Text(hint).font(.caption).foregroundStyle(.secondary) }
+                Spacer()
+                Button("대사 편집") {
+                    draft = savedDialogue
+                    restoreDefaults = false
+                    editingDialogue = true
+                }
             }
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
@@ -219,6 +233,37 @@ private struct StateRow: View {
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             loadURLs(providers) { add($0) }
             return true
+        }
+        .sheet(isPresented: $editingDialogue) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(kind.persona.name) · \(SpriteStore.labels[state] ?? state) 대사").font(.headline)
+                Text("한 줄에 대사 하나씩 입력하세요. 여러 줄이면 무작위로 고릅니다. 모두 지우고 저장하면 이 상태에서 대사를 하지 않습니다.")
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $draft)
+                    .accessibilityLabel("대사")
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .border(Color(nsColor: .separatorColor))
+                HStack {
+                    Button("기본 대사 복원") {
+                        draft = defaultDialogue
+                        restoreDefaults = true
+                    }
+                    Spacer()
+                    Button("취소") { editingDialogue = false }.keyboardShortcut(.cancelAction)
+                    Button("저장") {
+                        if restoreDefaults && draft == defaultDialogue {
+                            store.dialogue.reset(for: kind, state: state)
+                        } else if draft != savedDialogue {
+                            store.dialogue.save(draft, for: kind, state: state)
+                        }
+                        editingDialogue = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20)
+            .frame(width: 420)
         }
     }
 

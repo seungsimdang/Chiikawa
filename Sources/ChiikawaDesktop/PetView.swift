@@ -11,6 +11,7 @@ final class PetWindow: NSWindow {
     static var size: NSSize { NSSize(width: 230 * scale, height: 150 * scale) }
     let pet: Pet
     private let petView: PetView
+    var bodySize: CGSize { petView.bodySize }
 
     init(pet: Pet, sprites: SpriteSet) {
         self.pet = pet
@@ -34,8 +35,6 @@ final class PetWindow: NSWindow {
 
 final class PetView: NSView {
     static let baseY: CGFloat = 6
-    /// 크기 `보통`일 때 캐릭터 하나가 화면에서 차지하는 면적(pt²). 지름 약 85pt 원 정도.
-    static let spriteArea: CGFloat = 5600
     /// 알림이 걸린 캐릭터를 두 번 눌렀을 때.
     static var openNotice: (Pet) -> Void = { _ in }
     /// 캐릭터를 우클릭하면 뜨는 메뉴. 메뉴 막대의 🍙 메뉴와 같은 것.
@@ -79,7 +78,8 @@ final class PetView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let m = NSEvent.mouseLocation
-        guard let start = downAt else { return }
+        guard let start = downAt, pet.notice == nil else { return }
+        if dragging && pet.mode != .held { return }
         if !dragging && hypot(m.x - start.x, m.y - start.y) > 4 { dragging = true; pet.grab() }
         guard dragging else { return }
         let dt = max(event.timestamp - lastDrag.time, 0.001)
@@ -92,7 +92,7 @@ final class PetView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if dragging { pet.release(vx: velocity.x, vy: velocity.y) }
+        if dragging { if pet.mode == .held { pet.release(vx: velocity.x, vy: velocity.y) } }
         // 알림이 걸려 있으면 한 번 누르기는 무시하고 두 번 눌러야 세션으로 간다.
         else if pet.notice != nil { if event.clickCount >= 2 { Self.openNotice(pet) } }
         else { pet.click(now: event.timestamp) }
@@ -115,11 +115,31 @@ final class PetView: NSView {
 
     // MARK: - 그리기
 
+    private func currentAnimation() -> Anim? {
+        let state = pet.state
+        if state != shownState { shownState = state; pick = .random(in: 0..<1000); stateStart = pet.clock }
+        return sprites.anim(state, pick: pick)
+    }
+
+    private func spriteSize(_ anim: Anim) -> CGSize {
+        let size = anim.size, scale = PetWindow.scale
+        // 불투명 면적을 맞추고, 한 변은 140pt를 넘기지 않는다.
+        let k = min(sqrt(5600 / anim.mass), 140 / size.height, 140 / size.width) * scale
+        return CGSize(width: size.width * k, height: size.height * k)
+    }
+
+    var bodySize: CGSize {
+        guard let anim = currentAnimation() else { return .zero }
+        let size = spriteSize(anim)
+        // 춤·타자·호흡으로 그림이 조금 움직이는 공간도 남긴다.
+        return CGSize(width: size.width * 1.013 + 10, height: size.height * 1.025 + 8)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let t = pet.clock
         var cx = bounds.midX, base = Self.baseY
         switch pet.mode {
-        case .walk, .goTo: base += CGFloat(abs(sin(t * 14))) * 3
+        case .walk, .goTo: base += CGFloat(abs(sin(pet.walkTime * 14)) * pet.walkProgress) * 3
         case .eat: base += CGFloat(abs(sin(t * 10))) * 2
         case .react: cx += pet.kind == .chiikawa ? CGFloat(sin(t * 70)) * 1.5 : CGFloat(sin(t * 6)) * 3
         case .dance: cx += CGFloat(sin(t * 8)) * 5; base += CGFloat(abs(sin(t * 8))) * 4
@@ -128,29 +148,27 @@ final class PetView: NSView {
         if pet.tap > 0 { base += CGFloat(sin(pet.tap / Pet.tapDuration * .pi)) * 7 }
 
         let state = pet.state
-        if state != shownState { shownState = state; pick = .random(in: 0..<1000); stateStart = t }
-        guard let anim = sprites.anim(state, pick: pick) else { return }
+        guard let anim = currentAnimation() else { return }
         let ctx = NSGraphicsContext.current!.cgContext
         ctx.saveGState()
         ctx.translateBy(x: cx, y: base)
         ctx.saveGState()
         // 걸을 때만 방향에 맞춰 뒤집는다(대부분 정면 그림이라 다른 상태는 그대로).
         if pet.facing < 0 && state == "walk" { ctx.scaleBy(x: -1, y: 1) }
-        // 그림마다 여백·귀·소품·자세가 달라서 높이 대신 보이는 면적(불투명 픽셀)을 맞춘다. 창을 넘지 않게 자른다.
         let scale = PetWindow.scale
-        let k = min(sqrt(Self.spriteArea / anim.mass) * scale, 140 * scale / anim.size.height, 140 * scale / anim.size.width)
-        let w = anim.size.width * k, h = anim.size.height * k
+        let size = spriteSize(anim)
         // 자는 동안은 숨 쉬듯 천천히 부풀었다 줄어든다(발은 바닥에 붙인 채).
         if state == "sleep" { let b = CGFloat(sin(t * 2.2)) * 0.025; ctx.scaleBy(x: 1 - b / 2, y: 1 + b) }
         ctx.interpolationQuality = .high
-        ctx.draw(anim.frame(at: t - stateStart), in: CGRect(x: -w / 2, y: 0, width: w, height: h))
+        let animationTime = state == "walk" ? pet.walkTime : t - stateStart
+        ctx.draw(anim.frame(at: animationTime), in: CGRect(x: -size.width / 2, y: 0, width: size.width, height: size.height))
         ctx.restoreGState()
         // 우는 그림이 따로 있으면 그 위에 눈물을 또 그리지 않는다.
         ctx.scaleBy(x: scale, y: scale)
         if !(pet.effect == .tears && sprites.has("cry")) { drawEffect(pet.effect, t) }
         ctx.restoreGState()
 
-        if let text = pet.bubble { drawBubble(text, alert: pet.showingNotice) }
+        if let text = pet.bubble { drawBubble(text, alert: pet.notice != nil) }
     }
 
     /// 창 폭에 맞춰 줄을 바꾸고, 두 줄을 넘으면 끝을 말줄임(…)한다.
